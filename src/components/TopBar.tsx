@@ -44,7 +44,7 @@ export default function TopBar({ midi }: { midi: MidiKeyboard }) {
       <div className="flex items-center gap-2.5">
         <PrismMark size={24} animated={busy || state.rendering} />
         <div className="flex flex-col leading-none">
-          <span className="font-display text-[15px] tracking-[0.34em] text-ink">PRIZMIKER</span>
+          <span className="font-display text-[15px] tracking-[0.34em] text-ink">PRIZMICHAEL</span>
           <span className="font-type text-[10px] text-ink-3 mt-[5px] tracking-[0.02em]">harmonizer, after the messina</span>
         </div>
       </div>

@@ -12,7 +12,7 @@ function getTheme(): Theme {
 
 export function setTheme(theme: Theme): void {
   document.documentElement.dataset.theme = theme;
-  try { localStorage.setItem('prizmiker-theme', theme); } catch { /* private mode */ }
+  try { localStorage.setItem('prizmichael-theme', theme); } catch { /* private mode */ }
   for (const l of listeners) l();
 }
 

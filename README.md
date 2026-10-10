@@ -1,6 +1,6 @@
-# Prizmiker
+# Prizmichael
 
-Sing one voice, hear a choir. Prizmiker tunes a lead vocal and grows up to four
+Sing one voice, hear a choir. Prizmichael tunes a lead vocal and grows up to four
 harmony voices out of it, each locked to the chords you play. It's modeled on
 Bon Iver's **Messina**: Chris Messina's rig of Ableton, two Auto-Tunes and an
 Eventide H8000 that Justin Vernon plays from a keyboard, and on Francis and the
@@ -12,12 +12,12 @@ npm run dev   # http://localhost:3000, then "Try the demo"
 
 It also lives on [birdpile](https://github.com/fraunberger/birdpile) as the
 northern mockingbird. `npm run export:birdpile` builds a static copy served
-under `/prizmiker` into `../birdpile/public/prizmiker`; commit it there to update
+under `/prizmichael` into `../birdpile/public/prizmichael`; commit it there to update
 the bird.
 
 ## Playing it
 
-Prizmiker has two sides, switched at the top: **Live** for playing chords over
+Prizmichael has two sides, switched at the top: **Live** for playing chords over
 the track, and **Prepare** for writing harmony notes by hand.
 
 ### Live

@@ -41,7 +41,7 @@ class Recorder extends AudioWorkletProcessor {
     return true;
   }
 }
-registerProcessor('prizmiker-recorder', Recorder);
+registerProcessor('prizmichael-recorder', Recorder);
 `;
 
 interface Chunk { frame: number; l: Float32Array; r: Float32Array }
@@ -70,7 +70,7 @@ export class MasterRecorder {
     } finally {
       URL.revokeObjectURL(url);
     }
-    const node = new AudioWorkletNode(ctx, 'prizmiker-recorder', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
+    const node = new AudioWorkletNode(ctx, 'prizmichael-recorder', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
     source.connect(node);
     // Keep it pulled by the graph; its output is silent
     const mute = ctx.createGain();

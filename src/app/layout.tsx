@@ -16,12 +16,12 @@ const courier = Courier_Prime({
 });
 
 export const metadata: Metadata = {
-  title: "Prizmiker — Vocal Harmony Engine",
+  title: "Prizmichael — Vocal Harmony Engine",
   description: "Sing one voice, hear a choir. Pitch correction, Messina-style harmonies, and a creamy mix.",
 };
 
 // Set the saved theme before first paint so there's no flash
-const themeScript = `try{var t=localStorage.getItem('prizmiker-theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;}catch(e){}`;
+const themeScript = `try{var t=localStorage.getItem('prizmichael-theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t;}catch(e){}`;
 
 export default function RootLayout({
   children,

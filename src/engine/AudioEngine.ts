@@ -1099,7 +1099,7 @@ export class AudioEngine {
     const buffer = ctx.createBuffer(2, take.audio[0].length, take.sampleRate);
     buffer.copyToChannel(take.audio[0] as Float32Array<ArrayBuffer>, 0);
     buffer.copyToChannel(take.audio[1] as Float32Array<ArrayBuffer>, 1);
-    download(toWav(buffer), `${this.state.fileName ?? 'prizmiker'} - take ${take.number} (prizmiker).wav`);
+    download(toWav(buffer), `${this.state.fileName ?? 'prizmichael'} - take ${take.number} (prizmichael).wav`);
     this.update({ takes: this.state.takes.map(t => (t.id === id ? { ...t, saved: true } : t)) });
   }
 
@@ -1136,7 +1136,7 @@ export class AudioEngine {
       src.start(0);
     }
     const rendered = await offline.startRendering();
-    download(toWav(rendered), `${this.state.fileName ?? 'prizmiker'} (prizmiker).wav`);
+    download(toWav(rendered), `${this.state.fileName ?? 'prizmichael'} (prizmichael).wav`);
   }
 
   dispose(): void {

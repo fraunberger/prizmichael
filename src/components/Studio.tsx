@@ -69,7 +69,7 @@ function EmptyState() {
         <PrismMark size={58} />
         <h1 className="mt-6 font-display text-[30px] leading-tight tracking-[0.03em] text-ink">Sing one voice. Hear a choir.</h1>
         <p className="mt-3 text-[14px] leading-relaxed text-ink-2">
-          Prizmiker tunes a lead vocal and grows harmonies out of it. Each voice locks to the chords you play,
+          Prizmichael tunes a lead vocal and grows harmonies out of it. Each voice locks to the chords you play,
           the way Bon Iver&rsquo;s Messina does.
         </p>
         {state.status === 'error' && (
