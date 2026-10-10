@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * UI-only state shared across the studio: the visible slice of the timeline,
- * region splits and selection, the voice being drawn, and record arming.
+ * UI-only state shared across the studio: live or prepare mode, the visible
+ * slice of the timeline, region splits and selection, and the voice being drawn.
  */
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { VoiceIndex } from '@/engine/types';
 import { Voicing } from '@/engine/chords';
 import { useAudio } from './AudioContext';
@@ -14,7 +14,13 @@ export interface TimeView {
   end: number;
 }
 
+/** Live: play chords over the track, every pass kept as a take. Prepare: write notes. */
+export type Mode = 'live' | 'prepare';
+
 interface StudioValue {
+  mode: Mode;
+  setMode: (m: Mode) => void;
+
   view: TimeView;
   setView: (v: TimeView) => void;
   zoom: (factor: number, anchor: number) => void;
@@ -34,10 +40,10 @@ interface StudioValue {
   chordVoicing: Voicing;
   setChordVoicing: (v: Voicing) => void;
 
-  recArmed: boolean;
-  setRecArmed: (b: boolean) => void;
-  heldChord: number | null; // diatonic degree currently held (live playing)
-  setHeldChord: (d: number | null) => void;
+  octave: number;            // register of the chord row in live mode (−2…+2, ↑ / ↓)
+  setOctave: (o: number) => void;
+  heldChord: { degree: number; octaves: number } | null; // chord held right now (live playing)
+  setHeldChord: (c: { degree: number; octaves: number } | null) => void;
 }
 
 const StudioCtx = createContext<StudioValue | null>(null);
@@ -45,8 +51,11 @@ const StudioCtx = createContext<StudioValue | null>(null);
 const MIN_SPAN = 0.4;
 
 export function StudioProvider({ children }: { children: React.ReactNode }) {
-  const { state } = useAudio();
+  const { engine, state } = useAudio();
   const duration = state.duration || 10;
+
+  const [mode, setMode] = useState<Mode>('live');
+  useEffect(() => { engine.setCapture(mode === 'live'); }, [engine, mode]);
 
   // The view remembers which file it belongs to; a new file resets it to "fit"
   const [raw, setRaw] = useState<TimeView & { for: number }>({ start: 0, end: 10, for: -1 });
@@ -92,15 +101,16 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [activeVoice, setActiveVoice] = useState<VoiceIndex>(0);
   const [chordVoicing, setChordVoicing] = useState<Voicing>('choir');
-  const [recArmed, setRecArmed] = useState(false);
-  const [heldChord, setHeldChord] = useState<number | null>(null);
+  const [octave, setOctave] = useState(0);
+  const [heldChord, setHeldChord] = useState<{ degree: number; octaves: number } | null>(null);
 
   const value: StudioValue = {
+    mode, setMode,
     view, setView, zoom, pan,
     splits, setSplits, region, setRegion, regionAt,
     selected, setSelected,
     activeVoice, setActiveVoice, chordVoicing, setChordVoicing,
-    recArmed, setRecArmed, heldChord, setHeldChord,
+    octave, setOctave, heldChord, setHeldChord,
   };
   return <StudioCtx.Provider value={value}>{children}</StudioCtx.Provider>;
 }

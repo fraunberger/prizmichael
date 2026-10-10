@@ -60,6 +60,8 @@ export interface VoicingParams {
   double: number;   // 0–1: level of a second, double-tracked take of every voice
   width: number;    // 0–1: stereo spread
   throat: number;   // semitones of formant shift for every voice (−4…+4)
+  glitch: number;   // 0–1: leaps, formant flips, warble and stutters
+  vary: number;     // 0–1: share of a live chord's notes re-voiced on every press
 }
 
 // --- Space (mix-bus effects, applied live and on export) ---
@@ -67,6 +69,58 @@ export interface VoicingParams {
 export interface FxParams {
   space: number;  // 0–1 reverb amount
   warmth: number; // 0–1 tape-style saturation and low-mid warmth
+  drive: number;  // 0–1 bass fuzz (on top of the Drive lane)
+  gate: number;   // 0–1 how far the bass drops in live mode while no chord sings (1 = silent)
+}
+
+// --- Intensity (one move that turns several knobs, from clean to falling apart) ---
+
+export type Intensity = 1 | 2 | 3 | 4;
+
+/** Every knob an intensity level can turn (throat is always yours). */
+export const INTENSITY_KNOBS = ['retune', 'glide', 'humanize', 'double', 'width', 'vary', 'glitch', 'space', 'warmth', 'drive'] as const;
+export type KnobId = (typeof INTENSITY_KNOBS)[number];
+
+export const INTENSITY: Record<Intensity, { name: string; knobs: Record<KnobId, number> }> = {
+  1: {
+    name: 'clean',
+    knobs: { retune: 20, glide: 0.09, humanize: 0.45, double: 0.55, width: 0.8, vary: 0, glitch: 0, space: 0.42, warmth: 0.3, drive: 0 },
+  },
+  2: {
+    name: 'bloom',
+    knobs: { retune: 10, glide: 0.14, humanize: 0.6, double: 0.7, width: 0.9, vary: 0.25, glitch: 0.1, space: 0.5, warmth: 0.34, drive: 0.1 },
+  },
+  3: {
+    name: 'wild',
+    knobs: { retune: 0, glide: 0.2, humanize: 0.75, double: 0.85, width: 1, vary: 0.5, glitch: 0.35, space: 0.58, warmth: 0.4, drive: 0.25 },
+  },
+  4: {
+    name: 'insane',
+    knobs: { retune: 0, glide: 0.14, humanize: 0.9, double: 1, width: 1, vary: 1, glitch: 0.7, space: 0.66, warmth: 0.48, drive: 0.4 },
+  },
+};
+
+/** Knobs intensity leaves alone until you unlock them. */
+export const DEFAULT_LOCKS: KnobId[] = ['space', 'warmth'];
+
+// --- Takes (every pass you play chords over is kept, like a looper's history) ---
+
+export interface Take {
+  id: string;
+  number: number;
+  start: number;          // timeline seconds
+  end: number;
+  notes: MidiNote[];      // the chords as played, in timeline positions
+  levels: { time: number; level: Intensity }[]; // intensity changes, timeline positions
+  audio: [Float32Array, Float32Array] | null;   // the master output; null while the tail is still recording
+  sampleRate: number;
+  saved: boolean;
+}
+
+/** A chord being held right now (drawn growing on the piano roll). */
+export interface HeldChord {
+  notes: { pitch: number; voice: VoiceIndex }[];
+  start: number; // timeline seconds
 }
 
 // --- Automation ---
@@ -134,17 +188,35 @@ export interface EngineState {
   // Edit history
   canUndo: boolean;
   canRedo: boolean;
+  // Live playing
+  intensity: Intensity;
+  locks: KnobId[];           // knobs intensity doesn't touch
+  recording: { number: number; start: number } | null; // the take this pass will become, once a chord is played
+  held: HeldChord | null;
+  passNotes: MidiNote[];     // chords played so far in this pass (timeline positions)
+  takes: Take[];             // newest first
+  selectedTake: string | null;
+  auditioning: string | null; // take being listened back to
 }
 
+const CLEAN = INTENSITY[1].knobs;
+
 export const DEFAULT_VOICING: VoicingParams = {
-  glide: 0.09,
-  humanize: 0.45,
-  double: 0.55,
-  width: 0.8,
+  glide: CLEAN.glide,
+  humanize: CLEAN.humanize,
+  double: CLEAN.double,
+  width: CLEAN.width,
   throat: 0,
+  glitch: CLEAN.glitch,
+  vary: CLEAN.vary,
 };
 
-export const DEFAULT_FX: FxParams = { space: 0.42, warmth: 0.3 };
+export const DEFAULT_FX: FxParams = { space: CLEAN.space, warmth: CLEAN.warmth, drive: CLEAN.drive, gate: 0.75 };
+
+/** Bass level while the gate is closed: −36 dB × gate, silent at the top. */
+export function gateFloor(gate: number): number {
+  return gate >= 0.99 ? 0 : Math.pow(10, (-36 * gate) / 20);
+}
 
 export const DEFAULT_ENGINE_STATE: EngineState = {
   status: 'idle',
@@ -159,7 +231,7 @@ export const DEFAULT_ENGINE_STATE: EngineState = {
   tuningCents: 0,
   key: 'C',
   scale: 'major',
-  retuneSpeed: 20,
+  retuneSpeed: CLEAN.retune,
   voicing: DEFAULT_VOICING,
   fx: DEFAULT_FX,
   midiNotes: [],
@@ -185,6 +257,14 @@ export const DEFAULT_ENGINE_STATE: EngineState = {
   loop: null,
   canUndo: false,
   canRedo: false,
+  intensity: 1,
+  locks: DEFAULT_LOCKS,
+  recording: null,
+  held: null,
+  passNotes: [],
+  takes: [],
+  selectedTake: null,
+  auditioning: null,
 };
 
 // --- Utility Functions ---

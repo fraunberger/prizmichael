@@ -96,10 +96,13 @@ export const VOICINGS: { id: Voicing; label: string; hint: string }[] = [
 ];
 
 // Resynthesized voices sound most natural within about an octave of the singer,
-// and nothing should drop below a baritone's floor.
+// and nothing should drop below a baritone's floor. Register shifts (the rows
+// above and below the home row) may reach further.
 const VOICE_FLOOR = 43;      // G2
 const VOICE_CEILING = 81;    // A5
 const ROOT_FLOOR = 38;       // D2, for the low root of the choir voicing
+const REGISTER_FLOOR = 36;   // C2
+const REGISTER_CEILING = 88; // E6
 const MAX_REACH = 12;        // semitones from the melody
 
 const ABOVE_TARGET: Record<Voicing, number> = { choir: 1, close: 1, high: 2, low: 0 };
@@ -160,6 +163,85 @@ export function voiceChord(pitchClasses: number[], melody: number, voicing: Voic
   return upper;
 }
 
+/**
+ * Re-voice a share of a chord's notes, so a chord hit again sounds different
+ * (the higher the intensity, the more of it moves). A moved note jumps an
+ * octave or slides to a neighbouring chord tone; with everything moving, the
+ * whole chord is redrawn somewhere around the melody. The chord stays fully
+ * spelled, out of the melody's way, and sorted so voice I is the top line.
+ */
+export function varyVoicing(
+  pitches: number[],
+  pitchClasses: number[],
+  melody: number,
+  amount: number,
+  rand: () => number = Math.random,
+): number[] {
+  const n = pitches.length;
+  const moves = Math.min(n, Math.round(amount * n));
+  if (moves === 0 || n === 0) return pitches;
+  const m = Math.round(melody);
+  const pcOf = (p: number) => ((p % 12) + 12) % 12;
+  const fits = (p: number) => p >= VOICE_FLOOR && p <= VOICE_CEILING && Math.abs(p - m) >= 2 && pitchClasses.includes(pcOf(p));
+  const spelled = (set: number[]) => set.length < 3 || pitchClasses.slice(0, 3).every(pc => set.some(p => pcOf(p) === pc));
+  const pick = <T,>(list: T[]) => list[Math.floor(rand() * list.length)];
+
+  if (moves >= n) {
+    // Redraw the whole chord, from close to wide, keeping as few of the old notes as possible
+    const reach = 9 + Math.floor(rand() * 10);
+    const pool: number[] = [];
+    for (let p = m - reach; p <= m + reach; p++) if (fits(p)) pool.push(p);
+    let best = pitches, bestKept = n;
+    for (let tries = 0; tries < 80 && pool.length >= n && bestKept > 0; tries++) {
+      const set = new Set<number>();
+      while (set.size < n) set.add(pick(pool));
+      const out = [...set];
+      const kept = out.filter(p => pitches.includes(p)).length;
+      if (spelled(out) && kept < bestKept) { best = out; bestKept = kept; }
+    }
+    return [...best].sort((a, b) => b - a);
+  }
+
+  const out = [...pitches];
+  const order = out.map((_, i) => i).sort(() => rand() - 0.5).slice(0, moves);
+  for (const i of order) {
+    const p = out[i];
+    const tones: number[] = [];
+    for (let q = p - 12; q <= p + 12; q++) if (q !== p && fits(q)) tones.push(q);
+    // Octave jumps keep the chord as it is; neighbouring tones change its shape
+    const candidates = [p + 12, p - 12, ...tones.filter(q => Math.abs(q - p) <= 7)]
+      .filter(q => fits(q) && !out.includes(q))
+      .filter(q => spelled(out.map((x, j) => (j === i ? q : x))));
+    if (candidates.length) out[i] = pick(candidates);
+  }
+  return out.sort((a, b) => b - a);
+}
+
+/**
+ * Move a voiced chord up or down by octaves. A note that would land on the
+ * melody moves a further octave away, notes past the range fold back, and a
+ * note that would double another is moved apart (or dropped).
+ */
+export function shiftRegister(pitches: number[], octaves: number, melody: number): number[] {
+  if (octaves === 0) return pitches;
+  const m = Math.round(melody);
+  const dir = Math.sign(octaves);
+  const out: number[] = [];
+  for (const p0 of pitches) {
+    let p = p0 + 12 * octaves;
+    if (Math.abs(p - m) < 2) p += 12 * dir;
+    while (p > REGISTER_CEILING) p -= 12;
+    while (p < REGISTER_FLOOR) p += 12;
+    for (const q of [p, p + 12 * dir, p - 12 * dir]) {
+      if (q >= REGISTER_FLOOR && q <= REGISTER_CEILING && Math.abs(q - m) >= 2 && !out.includes(q)) {
+        out.push(q);
+        break;
+      }
+    }
+  }
+  return out.sort((a, b) => b - a);
+}
+
 /** Median of the corrected melody over a time range, in MIDI. */
 export function melodyCenter(contour: CorrectedPitchFrame[], start: number, end: number, fallback = 57): number {
   const vals: number[] = [];
@@ -177,9 +259,10 @@ export function chordNotes(
   end: number,
   contour: CorrectedPitchFrame[],
   voicing: Voicing,
+  octaves = 0,
 ): MidiNote[] {
   const center = melodyCenter(contour, start, end);
-  return voiceChord(chord.pitchClasses, center, voicing).map((pitch, i) => ({
+  return shiftRegister(voiceChord(chord.pitchClasses, center, voicing), octaves, center).map((pitch, i) => ({
     id: uid(),
     pitch,
     startTime: start,

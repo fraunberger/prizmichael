@@ -70,6 +70,26 @@ const PATHS: Record<string, React.ReactNode> = {
     </>
   ),
   chevron: <path d="M4.5 6.5 8 10l3.5-3.5" />,
+  check: <path d="M3.5 8.4 6.6 11.3 12.5 4.8" />,
+  lock: (
+    <>
+      <rect x="3.75" y="7.25" width="8.5" height="6" rx="1.2" fill="currentColor" stroke="none" />
+      <path d="M5.5 7.25V5.4a2.5 2.5 0 0 1 5 0v1.85" />
+    </>
+  ),
+  unlock: (
+    <>
+      <rect x="3.75" y="7.25" width="8.5" height="6" rx="1.2" />
+      <path d="M5.5 7.25V5.4a2.5 2.5 0 0 1 4.9-.7" />
+    </>
+  ),
+  close: <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />,
+  edit: (
+    <>
+      <path d="M10.2 3.3 12.7 5.8 6 12.5H3.5V10z" />
+      <path d="M8.6 4.9 11.1 7.4" />
+    </>
+  ),
   keys: (
     <>
       <rect x="2" y="3.5" width="12" height="9" rx="1.2" />

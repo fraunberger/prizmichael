@@ -2,8 +2,10 @@
 
 import React, { useEffect, useRef } from 'react';
 import { useAudio } from '@/context/AudioContext';
+import { useStudio } from '@/context/StudioContext';
 import { DEFAULT_ENGINE_STATE, TrackName } from '@/engine/types';
 import Fader, { gainToDb } from './ui/Fader';
+import TakesList from './TakesList';
 
 const STRIPS: { track: TrackName; label: string; color: string; hint: string }[] = [
   { track: 'dry', label: 'Dry', color: 'var(--dry)', hint: 'The untouched recording. Blending it with Lead causes phasing, so it starts at zero.' },
@@ -18,14 +20,16 @@ const FLOOR_DB = -54;
 
 export default function MixerPanel() {
   const { engine, state } = useAudio();
+  const { mode } = useStudio();
   const ms = state.mixerState;
+  const moving = state.playing || state.auditioning !== null;
   const meterEls = useRef<Partial<Record<MeterKey, HTMLDivElement | null>>>({});
   const holdEls = useRef<Partial<Record<MeterKey, HTMLDivElement | null>>>({});
   const clipEl = useRef<HTMLDivElement>(null);
 
   // One animation loop drives every meter while audio is moving
   useEffect(() => {
-    if (!state.playing) {
+    if (!moving) {
       for (const k of KEYS) {
         const m = meterEls.current[k], h = holdEls.current[k];
         if (m) m.style.transform = 'scaleY(0)';
@@ -64,7 +68,7 @@ export default function MixerPanel() {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [state.playing, engine]);
+  }, [moving, engine]);
 
   return (
     <aside className="flex flex-col w-[262px] shrink-0 border-l border-rule bg-paper-2">
@@ -119,7 +123,7 @@ export default function MixerPanel() {
           </div>
         </div>
       </div>
-      <VoiceLegend />
+      {mode === 'live' ? <TakesList /> : <VoiceLegend />}
     </aside>
   );
 }

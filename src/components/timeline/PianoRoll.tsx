@@ -6,8 +6,10 @@ import { useStudio } from '@/context/StudioContext';
 import { prepareCanvas, useElementSize } from '@/hooks/useElementSize';
 import { useTimelineWheel } from '@/hooks/useTimelineWheel';
 import { GUTTER, forEachTick, tickStep, timeToX, xToTime } from '@/lib/timeline';
-import { alpha, readTokens, useTheme } from '@/lib/theme';
-import { noteLabel, prefersFlats } from '@/lib/music';
+import { alpha, readTokens, Tokens, useTheme } from '@/lib/theme';
+import { noteLabel, pcName, prefersFlats } from '@/lib/music';
+import { usePlayhead } from '@/hooks/usePlayhead';
+import { nameChord } from '@/engine/chords';
 import { MidiNote, NOTE_NAMES, SCALE_INTERVALS, freqToMidi, uid } from '@/engine/types';
 import PlayheadLine from './PlayheadLine';
 
@@ -25,19 +27,34 @@ type Drag =
   | { kind: 'resize'; id: string; base: MidiNote[]; started: boolean }
   | { kind: 'draw'; t0: number; x0: number; pitch: number; id: string | null; base: MidiNote[] };
 
+/**
+ * Prepare mode: draw and edit the harmony notes. Live mode: watch the chords
+ * you play appear as you hold them, then the take you just played; the
+ * prepared notes stay faintly underneath. Click to jump there.
+ */
 export default function PianoRoll() {
   const { engine, state } = useAudio();
   const studio = useStudio();
-  const { view, splits, setSplits, region, setRegion, regionAt, selected, setSelected, activeVoice } = studio;
+  const { mode, view, splits, setSplits, region, setRegion, regionAt, selected, setSelected, activeVoice } = studio;
   const theme = useTheme();
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const overlay = useRef<HTMLCanvasElement>(null);
   const { width } = useElementSize(content);
   const drag = useRef<Drag | null>(null);
   useTimelineWheel(scroller, width);
+  const live = mode === 'live';
 
   const notes = state.midiNotes;
+  // While playing, this pass's chords (over a ghost of the last take); otherwise the take you're looking at
+  const { played, ghost } = useMemo(() => {
+    const take = state.takes.find(t => t.id === state.selectedTake);
+    const takeNotes = take?.notes ?? [];
+    return state.playing
+      ? { played: state.passNotes, ghost: takeNotes }
+      : { played: takeNotes, ghost: [] as MidiNote[] };
+  }, [state.takes, state.selectedTake, state.playing, state.passNotes]);
   const flats = prefersFlats(state.key, state.scale);
   const tonic = NOTE_NAMES.indexOf(state.key);
   const scalePcs = useMemo(
@@ -89,7 +106,7 @@ export default function PianoRoll() {
     forEachTick(view, major, t => ctx.fillRect(Math.round(timeToX(t, view, width)), 0, 1, HEIGHT));
 
     // Selected region + splits
-    if (region) {
+    if (region && !live) {
       const x0 = Math.max(GUTTER, timeToX(region[0], view, width));
       const x1 = Math.min(width, timeToX(region[1], view, width));
       if (x1 > x0) {
@@ -100,8 +117,8 @@ export default function PianoRoll() {
     ctx.strokeStyle = tk.ink3;
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 4]);
-    for (const s of splits) {
-      const x = Math.round(timeToX(s, view, width)) + 0.5;
+    for (const sp of live ? [] : splits) {
+      const x = Math.round(timeToX(sp, view, width)) + 0.5;
       if (x < GUTTER || x > width) continue;
       ctx.beginPath();
       ctx.moveTo(x, 0);
@@ -137,33 +154,60 @@ export default function PianoRoll() {
     // Notes: voice I on top
     ctx.font = `9.5px ${tk.fontType}`;
     ctx.textBaseline = 'middle';
-    const order = [...notes].sort((a, b) => b.voice - a.voice);
-    for (const n of order) {
-      const x0 = timeToX(n.startTime, view, width);
-      const x1 = timeToX(n.startTime + n.duration, view, width);
-      if (x1 < GUTTER || x0 > width || n.pitch > HIGH || n.pitch < LOW) continue;
-      const y = (HIGH - n.pitch) * KEY_H;
-      const w = Math.max(3, x1 - x0);
-      const color = tk.voices[n.voice];
-      const isSel = selected.has(n.id);
-      ctx.beginPath();
-      ctx.roundRect(x0, y + 1, w, KEY_H - 2, 3);
-      ctx.fillStyle = alpha(color, isSel ? 1 : 0.86);
-      ctx.fill();
-      if (isSel) {
-        ctx.strokeStyle = tk.ink;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+    const drawNotes = (list: MidiNote[], opacity: number, outline: ReadonlySet<string>) => {
+      const order = [...list].sort((a, b) => b.voice - a.voice);
+      for (const n of order) {
+        const x0 = timeToX(n.startTime, view, width);
+        const x1 = timeToX(n.startTime + n.duration, view, width);
+        if (x1 < GUTTER || x0 > width || n.pitch > HIGH || n.pitch < LOW) continue;
+        const isSel = outline.has(n.id);
+        paintNote(ctx, tk, n.pitch, n.voice, x0, x1, isSel ? 1 : opacity);
+        if (isSel) {
+          ctx.strokeStyle = tk.ink;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+        const w = x1 - x0;
+        if (w > 34 && opacity > 0.5) {
+          const y = (HIGH - n.pitch) * KEY_H;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(Math.max(x0, GUTTER), y, w, KEY_H);
+          ctx.clip();
+          ctx.fillStyle = 'rgba(255,255,255,0.92)';
+          ctx.fillText(noteLabel(n.pitch, flats), Math.max(x0, GUTTER) + 4, y + KEY_H / 2 + 0.5);
+          ctx.restore();
+        }
       }
-      if (w > 34) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(Math.max(x0, GUTTER), y, w, KEY_H);
-        ctx.clip();
-        ctx.fillStyle = 'rgba(255,255,255,0.92)';
-        ctx.fillText(noteLabel(n.pitch, flats), Math.max(x0, GUTTER) + 4, y + KEY_H / 2 + 0.5);
-        ctx.restore();
+    };
+    if (live) {
+      drawNotes(notes, 0.26, new Set());
+      drawNotes(ghost, 0.18, new Set());
+      drawNotes(played, 0.9, new Set());
+      // Name each chord as it was played
+      const chordsAt = new Map<number, MidiNote[]>();
+      for (const n of played) {
+        const k = Math.round(n.startTime * 1000);
+        chordsAt.set(k, [...(chordsAt.get(k) ?? []), n]);
       }
+      ctx.font = `10px ${tk.fontType}`;
+      ctx.textBaseline = 'alphabetic';
+      // Short chords side by side would print over each other: skip a name that would collide
+      const drawn: { x0: number; x1: number; y: number }[] = [];
+      for (const group of [...chordsAt.values()].sort((a, b) => a[0].startTime - b[0].startTime)) {
+        const x = Math.max(GUTTER + 2, timeToX(group[0].startTime, view, width) + 1);
+        if (x > width) continue;
+        const top = Math.max(...group.map(n => n.pitch));
+        const label = chordLabel(group.map(n => n.pitch), flats);
+        const y = (HIGH - top) * KEY_H - 4;
+        const box = { x0: x, x1: x + ctx.measureText(label).width + 4, y };
+        if (box.x1 < GUTTER || drawn.some(d => Math.abs(d.y - y) < 12 && d.x0 < box.x1 && box.x0 < d.x1)) continue;
+        drawn.push(box);
+        ctx.fillStyle = tk.ink2;
+        ctx.fillText(label, x, y);
+      }
+    } else {
+      drawNotes(notes, 0.86, selected);
     }
 
     // Keys
@@ -187,7 +231,43 @@ export default function PianoRoll() {
     }
     ctx.fillStyle = tk.rule2;
     ctx.fillRect(GUTTER - 0.5, 0, 1, HEIGHT);
-  }, [width, view, notes, selected, region, splits, scalePcs, tonic, flats, state.pitchContour, state.correctedContour, theme]);
+  }, [width, view, notes, selected, region, splits, scalePcs, tonic, flats, state.pitchContour, state.correctedContour, theme, live, played, ghost]);
+
+  // The chord being held grows with the playhead, on its own layer
+  const held = useRef(state.held);
+  const loopStart = useRef(state.loop?.start ?? 0);
+  useEffect(() => {
+    held.current = state.held;
+    loopStart.current = state.loop?.start ?? 0;
+  });
+  usePlayhead(t => {
+    const c = overlay.current;
+    if (!c || width === 0) return;
+    const ctx = prepareCanvas(c, width, HEIGHT);
+    const h = held.current;
+    if (!ctx || !h) return;
+    const tk = readTokens();
+    // After a loop wrap the chord carries on from the loop start
+    const from = t >= h.start ? h.start : loopStart.current;
+    const x0 = timeToX(from, view, width);
+    const x1 = Math.max(x0 + 3, timeToX(t, view, width));
+    if (x1 < GUTTER || x0 > width) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(GUTTER, 0, width - GUTTER, HEIGHT);
+    ctx.clip();
+    for (const n of [...h.notes].sort((a, b) => b.voice - a.voice)) {
+      if (n.pitch > HIGH || n.pitch < LOW) continue;
+      paintNote(ctx, tk, n.pitch, n.voice, x0, x1, 1);
+      ctx.fillStyle = tk.ink;
+      ctx.fillRect(x1 - 2, (HIGH - n.pitch) * KEY_H + 1, 2, KEY_H - 2);
+    }
+    const top = Math.max(...h.notes.map(n => n.pitch));
+    ctx.font = `bold 10.5px ${tk.fontType}`;
+    ctx.fillStyle = tk.ink;
+    ctx.fillText(chordLabel(h.notes.map(n => n.pitch), flats), Math.max(GUTTER + 2, x0 + 1), (HIGH - top) * KEY_H - 4);
+    ctx.restore();
+  });
 
   // --- Interaction -------------------------------------------------------------
   const local = (e: React.PointerEvent<HTMLCanvasElement> | React.MouseEvent<HTMLCanvasElement>) => {
@@ -232,6 +312,10 @@ export default function PianoRoll() {
     const { x, y } = local(e);
     if (x < GUTTER) return;
     const t = timeAt(x);
+    if (live) {
+      engine.seek(t);
+      return;
+    }
     const hit = hitNote(x, y);
     e.currentTarget.setPointerCapture(e.pointerId);
 
@@ -265,6 +349,10 @@ export default function PianoRoll() {
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const { x, y } = local(e);
     const d = drag.current;
+    if (live) {
+      e.currentTarget.style.cursor = x < GUTTER ? 'default' : 'pointer';
+      return;
+    }
     if (!d) {
       const hit = x >= GUTTER ? hitNote(x, y) : null;
       e.currentTarget.style.cursor = !hit ? (x < GUTTER ? 'default' : 'crosshair') : hit.edge ? 'ew-resize' : 'grab';
@@ -328,6 +416,7 @@ export default function PianoRoll() {
 
   const onContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
     e.preventDefault();
+    if (live) return;
     const { x, y } = local(e);
     const hit = hitNote(x, y);
     if (!hit) return;
@@ -351,10 +440,24 @@ export default function PianoRoll() {
           onPointerUp={onPointerUp}
           onPointerCancel={() => { drag.current = null; }}
           onContextMenu={onContextMenu}
-          aria-label="Harmony piano roll"
+          aria-label={live ? 'Chords as played. Click to jump there.' : 'Harmony piano roll'}
         />
+        <canvas ref={overlay} className="absolute inset-0 pointer-events-none" style={{ width: '100%', height: HEIGHT }} />
         {state.audioBuffer && <PlayheadLine view={view} width={width} />}
       </div>
     </div>
   );
+}
+
+function paintNote(ctx: CanvasRenderingContext2D, tk: Tokens, pitch: number, voice: number, x0: number, x1: number, opacity: number): void {
+  const y = (HIGH - pitch) * KEY_H;
+  ctx.beginPath();
+  ctx.roundRect(x0, y + 1, Math.max(3, x1 - x0), KEY_H - 2, 3);
+  ctx.fillStyle = alpha(tk.voices[voice], opacity);
+  ctx.fill();
+}
+
+function chordLabel(pitches: number[], flats: boolean): string {
+  const spell = (pc: number) => pcName(pc, flats);
+  return nameChord(pitches, spell) ?? pitches.map(p => noteLabel(p, flats)).join(' ');
 }

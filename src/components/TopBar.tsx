@@ -8,6 +8,8 @@ import { formatTime } from '@/lib/music';
 import { setTheme, useTheme } from '@/lib/theme';
 import PrismMark from './ui/PrismMark';
 import Icon from './ui/Icon';
+import Segmented from './ui/Segmented';
+import type { Mode } from '@/context/StudioContext';
 import type { MidiKeyboard } from '@/hooks/useMidiKeyboard';
 
 export const DEMO_URL = '/' + encodeURIComponent('Hozier - The Humours of Whiskey (Traditional, a cappella).mp3');
@@ -15,7 +17,7 @@ export const DEMO_NAME = 'Hozier — The Humours of Whiskey (a cappella)';
 
 export default function TopBar({ midi }: { midi: MidiKeyboard }) {
   const { engine, state } = useAudio();
-  const { region, view, recArmed, setRecArmed } = useStudio();
+  const { region, view, mode, setMode } = useStudio();
   const theme = useTheme();
   const fileInput = useRef<HTMLInputElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
@@ -26,6 +28,7 @@ export default function TopBar({ midi }: { midi: MidiKeyboard }) {
 
   const hasAudio = !!state.audioBuffer;
   const busy = state.status === 'loading' || state.status === 'analyzing';
+  const running = state.playing || state.auditioning !== null;
 
   const toggleLoop = () => {
     if (state.loop) engine.setLoop(null);
@@ -38,13 +41,23 @@ export default function TopBar({ midi }: { midi: MidiKeyboard }) {
   return (
     <header className="relative z-10 flex items-center gap-5 h-[58px] px-4 border-b border-rule bg-paper">
       {/* Brand */}
-      <div className="flex items-center gap-2.5 min-w-[236px]">
+      <div className="flex items-center gap-2.5">
         <PrismMark size={24} animated={busy || state.rendering} />
         <div className="flex flex-col leading-none">
           <span className="font-display text-[15px] tracking-[0.34em] text-ink">PRIZMIKER</span>
           <span className="font-type text-[10px] text-ink-3 mt-[5px] tracking-[0.02em]">harmonizer, after the messina</span>
         </div>
       </div>
+
+      <Segmented<Mode>
+        label="Mode"
+        value={mode}
+        onChange={setMode}
+        options={[
+          { value: 'live', label: 'Live', hint: 'Play chords over the track. Every pass is kept as a take.' },
+          { value: 'prepare', label: 'Prepare', hint: 'Write and edit harmony notes, regions and the drive lane' },
+        ]}
+      />
 
       {/* Transport */}
       <div className="flex items-center gap-1.5">
@@ -54,11 +67,11 @@ export default function TopBar({ midi }: { midi: MidiKeyboard }) {
         <button
           onClick={() => engine.togglePlay()}
           disabled={!hasAudio}
-          title={state.playing ? 'Pause (Space)' : 'Play (Space)'}
-          aria-label={state.playing ? 'Pause' : 'Play'}
+          title={running ? 'Pause (Space)' : 'Play (Space)'}
+          aria-label={running ? 'Pause' : 'Play'}
           className="w-[38px] h-[38px] rounded-full grid place-items-center bg-ink text-paper transition-transform active:scale-95 disabled:opacity-30 hover:bg-ink-2"
         >
-          <Icon name={state.playing ? 'pause' : 'play'} size={17} />
+          <Icon name={running ? 'pause' : 'play'} size={17} />
         </button>
         <button
           className={`btn btn-icon ${state.loop ? 'btn-ink' : 'btn-ghost'}`}
@@ -69,17 +82,6 @@ export default function TopBar({ midi }: { midi: MidiKeyboard }) {
           aria-label="Loop"
         >
           <Icon name="loop" />
-        </button>
-        <button
-          className={`btn btn-icon ${recArmed ? '' : 'btn-ghost'}`}
-          onClick={() => setRecArmed(!recArmed)}
-          disabled={!hasAudio}
-          aria-pressed={recArmed}
-          title="Record chords you play on the keys (R). Hold A–J while playing to sing chords I–VII."
-          aria-label="Arm chord recording"
-          style={recArmed ? { color: 'var(--accent)' } : undefined}
-        >
-          <Icon name="rec" size={14} />
         </button>
         <MidiButton midi={midi} disabled={!hasAudio} />
         <div className="ml-2 flex items-baseline gap-1.5 font-type tabular-nums">
@@ -115,9 +117,11 @@ export default function TopBar({ midi }: { midi: MidiKeyboard }) {
         <button className="btn" onClick={() => void engine.loadAudioUrl(DEMO_URL, DEMO_NAME)} disabled={busy}>
           Demo
         </button>
-        <button className="btn btn-ink" onClick={() => void engine.exportWav()} disabled={!hasAudio || busy} title="Bounce the mix, with space and warmth, to WAV">
-          <Icon name="export" /> Export
-        </button>
+        {mode === 'prepare' && (
+          <button className="btn btn-ink" onClick={() => void engine.exportWav()} disabled={!hasAudio || busy} title="Bounce the prepared notes and the mix, with space and warmth, to WAV">
+            <Icon name="export" /> Export
+          </button>
+        )}
         <button
           className="btn btn-ghost btn-icon"
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}

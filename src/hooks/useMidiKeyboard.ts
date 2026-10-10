@@ -19,10 +19,11 @@ const CHORD_SETTLE_MS = 30; // fingers never land at exactly the same time
 /**
  * Play the harmonizer from a MIDI keyboard, like the Messina. While the track
  * plays, held notes become the voices (highest note = voice I, up to four).
- * While paused, a chord played and released is written into the region.
+ * While stopped, a note starts the track in live mode; in prepare mode a chord
+ * played and released is written into the region.
  */
 export function useMidiKeyboard(): MidiKeyboard {
-  const { state } = useAudio();
+  const { engine, state } = useAudio();
   const studio = useStudio();
   const actions = useHarmonyActions();
   const [status, setStatus] = useState<MidiStatus>('off');
@@ -37,13 +38,19 @@ export function useMidiKeyboard(): MidiKeyboard {
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sounding = useRef(false);
 
+  const starting = useRef(false);
+
   const applyHeld = () => {
     settle.current = null;
-    const { state: s, actions: a } = latest.current;
-    if (!s.playing) return;
-    if (sounding.current) a.liveChordUp();
-    sounding.current = held.current.size > 0;
-    if (sounding.current) a.liveNotesDown([...held.current]);
+    const { actions: a } = latest.current;
+    if (!engine.getIsPlaying()) return;
+    if (held.current.size > 0) {
+      a.liveNotesDown([...held.current]); // changes the sounding chord without a gap
+      sounding.current = true;
+    } else if (sounding.current) {
+      a.liveChordUp();
+      sounding.current = false;
+    }
   };
 
   const onMessage = (e: MIDIMessageEvent) => {
@@ -60,10 +67,21 @@ export function useMidiKeyboard(): MidiKeyboard {
     } else {
       held.current.delete(note);
     }
-    const { state: s, actions: a } = latest.current;
-    if (s.playing) {
+    const { studio: st, actions: a } = latest.current;
+    if (engine.getIsPlaying()) {
+      captured.current.clear();
       if (settle.current) clearTimeout(settle.current);
       settle.current = setTimeout(applyHeld, CHORD_SETTLE_MS);
+    } else if (st.mode === 'live') {
+      captured.current.clear();
+      if (on && !starting.current) {
+        starting.current = true;
+        void engine.play().then(() => {
+          starting.current = false;
+          if (settle.current) clearTimeout(settle.current);
+          settle.current = setTimeout(applyHeld, CHORD_SETTLE_MS);
+        });
+      }
     } else if (held.current.size === 0 && captured.current.size > 0) {
       a.fillNotes([...captured.current]);
       captured.current.clear();

@@ -9,8 +9,7 @@ import { importMidiFile } from '@/engine/midiImporter';
 import { VoiceIndex } from '@/engine/types';
 import { formatTime, pcName, prefersFlats } from '@/lib/music';
 import Icon from './ui/Icon';
-
-export const CHORD_KEYS = ['a', 's', 'd', 'f', 'g', 'h', 'j'];
+import { CHORD_KEYS } from '@/lib/chordKeys';
 const NUMERALS = ['I', 'II', 'III', 'IV'];
 
 export default function HarmonyToolbar() {
@@ -54,7 +53,7 @@ export default function HarmonyToolbar() {
       <div className="flex items-center gap-1.5">
         <span className="label mr-0.5">Fill</span>
         {chords.map((c, i) => {
-          const held = heldChord === i;
+          const held = heldChord?.degree === i;
           return (
             <button
               key={c.degree}

@@ -8,15 +8,18 @@ import {
   chordNotes,
   diatonicChords,
   melodyCenter,
+  shiftRegister,
+  varyVoicing,
   voiceChord,
 } from '@/engine/chords';
 import { VoiceIndex, uid } from '@/engine/types';
+import { MAX_OCTAVE } from '@/lib/chordKeys';
 
 /** Note-editing actions shared by the toolbar and keyboard shortcuts. */
 export function useHarmonyActions() {
   const { engine, state } = useAudio();
   const studio = useStudio();
-  const { region, regionAt, setRegion, selected, setSelected, chordVoicing, recArmed, setHeldChord } = studio;
+  const { region, regionAt, setRegion, selected, setSelected, chordVoicing, octave, setOctave, heldChord, setHeldChord } = studio;
   const chords = diatonicChords(state.key, state.scale);
 
   /** Fill the selected region (or the one under the playhead) with a diatonic chord. */
@@ -30,15 +33,31 @@ export function useHarmonyActions() {
     setRegion([start, end]);
   };
 
-  /** Hold a chord over the playing track (the Messina way). */
+  /** Hold a chord over the playing track (the Messina way). Vary re-voices part of it on every press. */
   const liveChordDown = (degree: number) => {
     const chord = chords[degree];
     if (!chord) return;
     const t = engine.getPlaybackTime();
     const center = melodyCenter(state.correctedContour, t - 0.3, t + 1.2);
-    const pitches = voiceChord(chord.pitchClasses, center, chordVoicing);
+    const { vary } = engine.getState().voicing;
+    const voiced = varyVoicing(voiceChord(chord.pitchClasses, center, chordVoicing), chord.pitchClasses, center, vary);
+    const pitches = shiftRegister(voiced, octave, center);
     engine.startLiveChord(pitches.map((pitch, i) => ({ pitch, voice: i as VoiceIndex })));
-    setHeldChord(degree);
+    setHeldChord({ degree, octaves: octave });
+  };
+
+  /** Move the chord row by octaves (↑ / ↓). A chord being held jumps with it. */
+  const changeOctave = (delta: number) => {
+    const next = Math.max(-MAX_OCTAVE, Math.min(MAX_OCTAVE, octave + delta));
+    if (next === octave) return;
+    setOctave(next);
+    const held = engine.getState().held;
+    if (!held || !heldChord) return;
+    const t = engine.getPlaybackTime();
+    const center = melodyCenter(state.correctedContour, t - 0.3, t + 1.2);
+    const pitches = shiftRegister(held.notes.map(n => n.pitch), next - octave, center);
+    engine.startLiveChord(pitches.map((pitch, i) => ({ pitch, voice: i as VoiceIndex })));
+    setHeldChord({ degree: heldChord.degree, octaves: next });
   };
 
   /** Hold exact pitches (from a MIDI keyboard): highest note is voice I. */
@@ -61,8 +80,7 @@ export function useHarmonyActions() {
   };
 
   const liveChordUp = () => {
-    const played = engine.stopLiveChord();
-    if (recArmed && played.length) engine.addMidiNotes(played);
+    engine.stopLiveChord();
     setHeldChord(null);
   };
 
@@ -92,5 +110,5 @@ export function useHarmonyActions() {
 
   const selectAll = () => setSelected(new Set(state.midiNotes.map(n => n.id)));
 
-  return { chords, fillChord, fillNotes, liveChordDown, liveNotesDown, liveChordUp, harmonize, deleteSelected, transposeSelected, revoiceSelected, selectAll };
+  return { chords, fillChord, fillNotes, liveChordDown, changeOctave, liveNotesDown, liveChordUp, harmonize, deleteSelected, transposeSelected, revoiceSelected, selectAll };
 }

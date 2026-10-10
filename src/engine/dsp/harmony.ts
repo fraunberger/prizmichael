@@ -11,12 +11,14 @@
  *    distinct timbre per voice (the Messina's deliberate randomization)
  *  - double: a second, independently humanized take of every voice, delayed
  *    and panned opposite. This is most of the "creamy" width.
+ *  - glitch: leaps, formant flips, warble and stutters (see glitch.ts)
  */
 import { MidiNote, VOICE_COUNT, VoicingParams } from '../types';
 import { PitchTrack } from './pitch';
 import { PitchMarks } from './marks';
 import { psola, voicingMask, gainAt, SampleRange } from './psola';
 import { rng, smoothingCoeff } from './filters';
+import { Glitch, makeGlitch } from './glitch';
 
 // Outer voices go wide, inner voices half-way; each double mirrors its voice
 const VOICE_PAN = [-0.95, 0.95, -0.55, 0.55];
@@ -27,6 +29,9 @@ const ATTACK = 0.018;
 const RELEASE = 0.09;
 const AUTO_THROAT = 0.22;  // fraction of the pitch shift the formants follow
 const MAX_AUTO_THROAT = 4;
+const MAX_FORMANT = 9;     // semitones, all sources combined
+const PITCH_CEILING = 86;  // glitch leaps fold back an octave past these (D6, G1)
+const PITCH_FLOOR = 31;
 
 interface Placed { pitch: number; start: number; end: number }
 
@@ -71,7 +76,8 @@ export function renderHarmony(
       const drift = (t: number) => driftAmt * (0.6 * Math.sin(2 * Math.PI * df1 * t + dp1) + 0.4 * Math.sin(2 * Math.PI * df2 * t + dp2));
 
       const placed = placeNotes(byVoice[v], () => rand() * 0.022 * h + (isDouble ? rand() * 0.01 : 0));
-      const { hz, gain, formant } = buildCurves(placed, track, vmask, params, detune, character, drift);
+      const glitch = makeGlitch(params.glitch, 7919 * (v + 1) + 104729 * take);
+      const { hz, gain, formant } = buildCurves(placed, track, vmask, params, detune, character, drift, glitch);
 
       const g = norm * (isDouble ? params.double * 0.85 : 1);
       const pan = clamp(VOICE_PAN[v] * params.width * (isDouble ? -0.9 : 1), -1, 1);
@@ -79,16 +85,25 @@ export function renderHarmony(
       const gl = g * Math.cos(theta), gr = g * Math.sin(theta);
       // The double sits a few ms late, like a second pass at the mic (ADT)
       const delay = isDouble ? Math.round((0.011 + 0.006 * rand()) * sampleRate) : 0;
-      const src = { start: Math.max(0, range.start - delay), end: Math.max(0, range.end - delay) };
+      // Stutters repeat audio from earlier in their slot, so render a little before the window
+      const pre = glitch ? Math.min(range.start, Math.ceil(glitch.preroll * sampleRate)) : 0;
+      const from = range.start - pre; // output sample at sig[0]
+      const src = { start: Math.max(0, from - delay), end: Math.max(0, range.end - delay) };
       if (src.end <= src.start) continue;
       const y = psola(x, sampleRate, marks, { hop, hz, formant }, src);
 
+      const sig = new Float32Array(len + pre);
       for (let j = 0; j < y.length; j++) {
         if (y[j] === 0) continue;
         const i = src.start + j;      // source sample
-        const o = i + delay - range.start; // output index
-        if (o < 0 || o >= len) continue;
-        const s = y[j] * gainAt(gain, i, spf);
+        const o = i + delay - from;   // output index
+        if (o < 0 || o >= sig.length) continue;
+        sig[o] = y[j] * gainAt(gain, i, spf);
+      }
+      glitch?.apply(sig, from, sampleRate);
+      for (let o = 0; o < len; o++) {
+        const s = sig[o + pre];
+        if (s === 0) continue;
         left[o] += s * gl;
         right[o] += s * gr;
       }
@@ -120,6 +135,7 @@ function buildCurves(
   detuneCents: number,
   character: number,
   drift: (t: number) => number,
+  glitch: Glitch | null,
 ) {
   const { hop } = track;
   const frames = track.f0.length;
@@ -160,14 +176,23 @@ function buildCurves(
       if (env < 1e-3) current = -1;
     }
 
+    // Glitch leaps snap rather than glide, and fold back inside a singable range
+    let sung = pitch;
+    if (glitch && !isNaN(pitch)) {
+      sung = pitch + glitch.pitch(t);
+      while (sung > PITCH_CEILING) sung -= 12;
+      while (sung < PITCH_FLOOR) sung += 12;
+    }
+
     if (track.f0[k] > 0) source = 69 + 12 * Math.log2(track.f0[k] / 440);
-    const shift = isNaN(source) || isNaN(pitch) ? 0 : pitch - source;
+    const shift = isNaN(source) || isNaN(sung) ? 0 : sung - source;
     const formTarget = params.throat + clamp(AUTO_THROAT * shift, -MAX_AUTO_THROAT, MAX_AUTO_THROAT) + character;
     form = isNaN(form) ? formTarget : form + (formTarget - form) * formantK;
-    formant[k] = Math.pow(2, form / 12);
+    const flip = glitch ? glitch.formant(t) : 0;
+    formant[k] = Math.pow(2, clamp(form + flip, -MAX_FORMANT, MAX_FORMANT) / 12);
 
-    if (env > 1e-3 && !isNaN(pitch)) {
-      hz[k] = 440 * Math.pow(2, (pitch - 69) / 12);
+    if (env > 1e-3 && !isNaN(sung)) {
+      hz[k] = 440 * Math.pow(2, (sung - 69) / 12);
       gain[k] = env * vmask[k];
     }
   }

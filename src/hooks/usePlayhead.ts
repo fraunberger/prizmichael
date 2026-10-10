@@ -4,7 +4,8 @@ import { useEffect, useRef } from 'react';
 import { useAudio } from '@/context/AudioContext';
 
 /**
- * Calls `onFrame(time)` every animation frame while playing, and once whenever
+ * Calls `onFrame(time)` every animation frame while playing (or listening to
+ * a take), and once whenever
  * the engine state changes while paused (seek, stop). Use it to move DOM
  * playheads and time readouts without re-rendering React every frame.
  */
@@ -14,7 +15,7 @@ export function usePlayhead(onFrame: (time: number) => void): void {
   useEffect(() => { cb.current = onFrame; });
 
   useEffect(() => {
-    if (!state.playing) {
+    if (!state.playing && !state.auditioning) {
       cb.current(engine.getPlaybackTime());
       return;
     }

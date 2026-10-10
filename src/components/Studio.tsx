@@ -6,10 +6,12 @@ import { useStudio } from '@/context/StudioContext';
 import { useHarmonyActions } from '@/hooks/useHarmonyActions';
 import { useMidiKeyboard } from '@/hooks/useMidiKeyboard';
 import { importMidiFile } from '@/engine/midiImporter';
-import { VoiceIndex } from '@/engine/types';
+import { Intensity, VoiceIndex } from '@/engine/types';
 import TopBar, { DEMO_NAME, DEMO_URL } from './TopBar';
 import InstrumentPanel from './InstrumentPanel';
-import HarmonyToolbar, { CHORD_KEYS } from './HarmonyToolbar';
+import HarmonyToolbar from './HarmonyToolbar';
+import { CHORD_KEYS } from '@/lib/chordKeys';
+import LiveToolbar from './LiveToolbar';
 import MixerPanel from './MixerPanel';
 import Overview from './timeline/Overview';
 import Ruler from './timeline/Ruler';
@@ -20,6 +22,8 @@ import PrismMark from './ui/PrismMark';
 
 export default function Studio() {
   const { state } = useAudio();
+  const { mode } = useStudio();
+  const live = mode === 'live';
   const dragging = useFileDrop();
   const midi = useMidiKeyboard();
   useShortcuts();
@@ -34,17 +38,17 @@ export default function Studio() {
       <div className="flex flex-1 min-h-0">
         <main className="relative flex flex-col flex-1 min-w-0">
           <Overview />
-          <HarmonyToolbar />
+          {live ? <LiveToolbar /> : <HarmonyToolbar />}
           <Ruler />
-          <ChordLane />
+          {!live && <ChordLane />}
           <PianoRoll />
-          <AutomationLane />
+          {!live && <AutomationLane />}
           {showEmpty && <EmptyState />}
           {showBusy && <BusyState />}
         </main>
         <MixerPanel />
       </div>
-      <Footer />
+      <Footer live={live} />
       {dragging && (
         <div className="fixed inset-3 z-50 rounded-[18px] border-2 border-dashed border-ink-3 bg-paper/80 grid place-items-center pointer-events-none">
           <div className="flex flex-col items-center gap-3">
@@ -93,8 +97,8 @@ function EmptyState() {
         <ol className="mt-9 grid grid-cols-3 gap-5 text-left">
           {[
             ['∆', 'Hear', 'We track the melody, find its key, and tune it.'],
-            ['Σ', 'Voice', 'Fill chords on the white keys, or auto-harmonize.'],
-            ['∞', 'Bloom', 'Doubles, glide, a long dark hall, a little tape.'],
+            ['Σ', 'Play', 'Hold chords on A–J while it plays. Every pass is kept as a take.'],
+            ['✦', 'Push', '1–4 takes it from clean to falling apart.'],
           ].map(([g, t, d]) => (
             <li key={t} className="flex flex-col gap-1.5">
               <span className="font-type text-[15px] text-ink-2">{g}</span>
@@ -122,18 +126,27 @@ function BusyState() {
   );
 }
 
-function Footer() {
-  const items: [string, string][] = [
-    ['space', 'play'],
-    ['A–J', 'chords I–VII · hold while playing'],
-    ['R', 'record chords'],
-    ['L', 'loop'],
-    ['1–4', 'voice'],
-    ['drag', 'draw a note'],
-    ['⇧ click', 'split'],
-    ['⌘Z', 'undo'],
-    ['⌘ scroll', 'zoom'],
-  ];
+function Footer({ live }: { live: boolean }) {
+  const items: [string, string][] = live
+    ? [
+        ['space', 'play'],
+        ['A–J', 'hold to sing chords I–VII'],
+        ['↑ ↓', 'octave'],
+        ['1–4', 'intensity'],
+        ['L', 'loop'],
+        ['click', 'jump there'],
+        ['⌘ scroll', 'zoom'],
+      ]
+    : [
+        ['space', 'play'],
+        ['A–J', 'fill the region (hold while playing to hear)'],
+        ['L', 'loop'],
+        ['1–4', 'voice'],
+        ['drag', 'draw a note'],
+        ['⇧ click', 'split'],
+        ['⌘Z', 'undo'],
+        ['⌘ scroll', 'zoom'],
+      ];
   return (
     <footer className="flex items-center gap-4 h-7 px-4 border-t border-rule bg-paper-2 overflow-hidden whitespace-nowrap">
       {items.map(([k, v]) => (
@@ -231,9 +244,16 @@ function useShortcuts(): void {
         e.preventDefault();
         if (e.repeat) return;
         if (s.playing) {
-          release();
+          // Straight to the new chord: the engine crossfades, no gap
           held.current = key;
           a.liveChordDown(chord);
+        } else if (st.mode === 'live') {
+          // In live mode a chord starts the track
+          release();
+          held.current = key;
+          void engine.play().then(() => {
+            if (held.current === key) latest.current.actions.liveChordDown(chord);
+          });
         } else {
           a.fillChord(chord);
         }
@@ -258,11 +278,11 @@ function useShortcuts(): void {
           }
           break;
         }
-        case 'r':
-        case 'R':
-          st.setRecArmed(!st.recArmed);
-          break;
         case '1': case '2': case '3': case '4': {
+          if (st.mode === 'live') {
+            engine.setIntensity(Number(e.key) as Intensity);
+            break;
+          }
           const v = (Number(e.key) - 1) as VoiceIndex;
           st.setActiveVoice(v);
           a.revoiceSelected(v);
@@ -274,12 +294,17 @@ function useShortcuts(): void {
           break;
         case 'ArrowUp':
         case 'ArrowDown':
-          if (st.selected.size) {
+          if (st.mode === 'live') {
+            // The chord row moves by octaves
+            e.preventDefault();
+            if (!e.repeat) a.changeOctave(e.key === 'ArrowUp' ? 1 : -1);
+          } else if (st.selected.size) {
             e.preventDefault();
             a.transposeSelected((e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 12 : 1));
           }
           break;
         case 'Escape':
+          engine.stopAudition();
           st.setSelected(new Set());
           st.setRegion(null);
           break;

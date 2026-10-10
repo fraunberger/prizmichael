@@ -7,7 +7,7 @@
  *   dry ┐
  *  lead ┴─ lead bus (HPF, de-harsh, air, comp) ─┐
  * voices ── voice bus (HPF, darker top, comp) ──┼─ sum ─ warmth ─ glue ─ limiter ─ out
- *  bass ── bass bus (low shelf) ────────────────┤
+ *  bass ── bass bus (low shelf, fuzz, gate) ────┤
  *                 sends ── pre-delay ─ hall ────┘
  */
 import { FxParams, MixerState, TrackName } from './types';
@@ -18,6 +18,8 @@ const REVERB_SEND = { lead: 0.22, voices: 0.6, bass: 0.03 };
 
 export interface MixGraph {
   inputs: Record<TrackName, GainNode>;
+  /** After the fuzz, so a closed gate is quiet however hard the bass is driven. */
+  bassGate: GainNode;
   meters: Record<TrackName | 'master', AnalyserNode>;
   output: AudioNode;
   setMixer(mixer: MixerState): void;
@@ -67,7 +69,7 @@ export function createMixGraph(ctx: BaseAudioContext, mixer: MixerState, fx: FxP
     bass: gain(trackGain(mixer, 'bass')),
   };
   const meters = { dry: meter(), corrected: meter(), harmony: meter(), bass: meter(), master: meter() };
-  for (const name of TRACK_NAMES) inputs[name].connect(meters[name]);
+  for (const name of TRACK_NAMES) if (name !== 'bass') inputs[name].connect(meters[name]);
 
   const sum = gain();
   const reverbIn = gain();
@@ -92,14 +94,50 @@ export function createMixGraph(ctx: BaseAudioContext, mixer: MixerState, fx: FxP
     compressor(-24, 2, 0.015, 0.25, 12),
   );
 
-  const bassOut = chain(inputs.bass, biquad('lowshelf', 90, 0.707, 2));
+  // Bass fuzz: an octave-up rectifier blended in as it's pushed (Octavia
+  // style), then a hard, lopsided clip and a mid push so the grit cuts through
+  const bassIn = chain(inputs.bass, biquad('lowshelf', 90, 0.707, 2));
+  const fuzzDry = gain();
+  const rectPre = gain();
+  const rectifier = ctx.createWaveShaper();
+  rectifier.curve = rectifierCurve();
+  rectifier.oversample = '4x';
+  const rectMix = gain(0);
+  const fuzzPre = gain();
+  const clipper = ctx.createWaveShaper();
+  clipper.curve = fuzzCurve();
+  clipper.oversample = '4x';
+  const fuzzTone = biquad('lowpass', 1200, 0.9);
+  const fuzzMid = biquad('peaking', 850, 0.8, 0);
+  const fuzzWet = gain(0);
+  const bassOut = gain();
+  bassIn.connect(fuzzDry).connect(bassOut);
+  bassIn.connect(fuzzPre);
+  chain(bassIn, rectPre, rectifier, biquad('highpass', 40), rectMix, fuzzPre);
+  chain(fuzzPre, clipper, fuzzTone, fuzzMid, fuzzWet, bassOut);
+  const applyDrive = (drive: number, to: (param: AudioParam, value: number) => void) => {
+    const d = Math.min(1, Math.max(0, drive));
+    const wet = Math.min(1, d * 2.2);
+    to(fuzzDry.gain, 1 - wet);
+    to(fuzzWet.gain, wet * 0.42 / (1 + d * 0.8));
+    to(fuzzPre.gain, 1 + d * d * d * 70); // gentle low on the dial, savage at the top
+    to(rectPre.gain, 1 + d * 2);
+    to(rectMix.gain, Math.max(0, d - 0.35) * 1.6);
+    to(fuzzTone.frequency, 900 + d * 4200);
+    to(fuzzMid.gain, d * 7);
+  };
+  applyDrive(fx.drive, (param, value) => { param.value = value; });
+
+  const bassGate = gain();
+  bassOut.connect(bassGate);
+  bassGate.connect(meters.bass);
 
   leadOut.connect(sum);
   voicesOut.connect(sum);
-  bassOut.connect(sum);
+  bassGate.connect(sum);
   leadOut.connect(gain(REVERB_SEND.lead)).connect(reverbIn);
   voicesOut.connect(gain(REVERB_SEND.voices)).connect(reverbIn);
-  bassOut.connect(gain(REVERB_SEND.bass)).connect(reverbIn);
+  bassGate.connect(gain(REVERB_SEND.bass)).connect(reverbIn);
 
   // Hall: pre-delay keeps the voice up front; the tail is long and dark
   const preDelay = ctx.createDelay(0.2);
@@ -129,6 +167,7 @@ export function createMixGraph(ctx: BaseAudioContext, mixer: MixerState, fx: FxP
 
   return {
     inputs,
+    bassGate,
     meters,
     output: out,
     setMixer(m) {
@@ -140,6 +179,7 @@ export function createMixGraph(ctx: BaseAudioContext, mixer: MixerState, fx: FxP
       set(makeup.gain, 1 / (1 + f.warmth * 1.2));
       set(body.gain, f.warmth * 2.5);
       set(smooth.gain, -f.warmth * 2.5);
+      applyDrive(f.drive, set);
     },
   };
 }
@@ -154,6 +194,25 @@ function saturationCurve(): Float32Array<ArrayBuffer> {
     const x = (i / (n - 1)) * 2 - 1;
     curve[i] = (Math.tanh(x + bias) - Math.tanh(bias)) / norm;
   }
+  return curve;
+}
+
+/** Fuzz: hard and lopsided (the negative side clips earlier and lower). */
+function fuzzCurve(): Float32Array<ArrayBuffer> {
+  const n = 4096;
+  const curve = new Float32Array(new ArrayBuffer(n * 4));
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    curve[i] = x >= 0 ? Math.tanh(2.5 * x) : 0.82 * Math.tanh(1.8 * x);
+  }
+  return curve;
+}
+
+/** Full-wave rectifier: folds the wave up, an octave above the bass (Octavia-style). */
+function rectifierCurve(): Float32Array<ArrayBuffer> {
+  const n = 4096;
+  const curve = new Float32Array(new ArrayBuffer(n * 4));
+  for (let i = 0; i < n; i++) curve[i] = Math.abs((i / (n - 1)) * 2 - 1) * 2 - 1;
   return curve;
 }
 
