@@ -12,7 +12,7 @@ import Segmented from './ui/Segmented';
 import type { Mode } from '@/context/StudioContext';
 import type { MidiKeyboard } from '@/hooks/useMidiKeyboard';
 
-export const DEMO_URL = '/' + encodeURIComponent('Hozier - The Humours of Whiskey (Traditional, a cappella).mp3');
+export const DEMO_URL = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/${encodeURIComponent('Hozier - The Humours of Whiskey (Traditional, a cappella).mp3')}`;
 export const DEMO_NAME = 'Hozier — The Humours of Whiskey (a cappella)';
 
 export default function TopBar({ midi }: { midi: MidiKeyboard }) {

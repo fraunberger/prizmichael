@@ -10,6 +10,11 @@ Lights' **Prismizer** sound.
 npm run dev   # http://localhost:3000, then "Try the demo"
 ```
 
+It also lives on [birdpile](https://github.com/fraunberger/birdpile) as the
+northern mockingbird. `npm run export:birdpile` builds a static copy served
+under `/prizmiker` into `../birdpile/public/prizmiker`; commit it there to update
+the bird.
+
 ## Playing it
 
 Prizmiker has two sides, switched at the top: **Live** for playing chords over
