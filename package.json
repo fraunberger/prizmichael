@@ -6,8 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "export:birdpile": "node scripts/export-birdpile.mjs"
+    "lint": "eslint"
   },
   "dependencies": {
     "@tonejs/midi": "^2.0.28",

@@ -10,10 +10,11 @@ Lights' **Prismizer** sound.
 npm run dev   # http://localhost:3000, then "Try the demo"
 ```
 
-It also lives on [birdpile](https://github.com/fraunberger/birdpile) as the
-northern mockingbird. `npm run export:birdpile` builds a static copy served
-under `/prizmichael` into `../birdpile/public/prizmichael`; commit it there to update
-the bird.
+It's live at **https://prizmichael.vercel.app**: Vercel redeploys it on every
+push to `main`, and branches and pull requests get their own preview links.
+It's also the northern mockingbird on
+[birdpile](https://github.com/fraunberger/birdpile), which shows that same
+deployment, so the bird updates with it.
 
 ## Playing it
 
