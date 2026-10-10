@@ -9,12 +9,19 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@tonejs/midi": "^2.0.28",
+    "audiobuffer-to-wav": "^1.0.0",
     "next": "16.2.1",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "rubberband-wasm": "^3.3.0",
+    "soundtouchjs": "^0.3.0",
+    "tone": "^15.1.22",
+    "wavesurfer.js": "^7.12.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/audiobuffer-to-wav": "^1.0.4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

@@ -1,36 +1,70 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Prizmiker
 
-## Getting Started
-
-First, run the development server:
+Sing one voice, hear a choir. Prizmiker tunes a lead vocal and grows up to four
+harmony voices out of it, each locked to the chords you play. It's modeled on
+Bon Iver's **Messina**: Chris Messina's rig of Ableton, two Auto-Tunes and an
+Eventide H8000 that Justin Vernon plays from a keyboard, and on Francis and the
+Lights' **Prismizer** sound.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev   # http://localhost:3000, then "Try the demo"
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Playing it
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| | |
+|---|---|
+| `space` | play / pause |
+| `A S D F G H J` | chords I–VII of the song's key (the "white keys"). Hold while playing to sing them live over the track; while paused, fills the selected region |
+| `R` | arm recording: chords you play live are written into the piano roll |
+| `L` | loop the selected region (or what's on screen); drag on the ruler to set a loop |
+| `1`–`4` | voice to draw with (also moves selected notes to that voice) |
+| drag in the piano roll | draw a note · drag a note to move · drag its right edge to resize · alt-drag to duplicate · right-click to delete |
+| `shift`-click / double-click the Chords lane | split the song into regions |
+| `⌘Z` / `⇧⌘Z` | undo / redo |
+| `⌘`-scroll, `+` / `−` | zoom the timeline |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+A MIDI keyboard works too (the keys button in the transport, Chrome/Edge):
+hold notes while the track plays and the voices sing exactly those notes, with
+the highest note on voice I.
 
-## Learn More
+## The sound
 
-To learn more about Next.js, take a look at the following resources:
+- **Tune** (∆): lead pitch correction. Retune speed smooths the *correction*,
+  like Auto-Tune, so hard settings give the robotic snap and slow ones keep
+  vibrato. The key is detected automatically (Krumhansl–Kessler), compensating
+  for singers who sit sharp or flat overall.
+- **Voices** (Σ): every voice is pitch-locked to its notes (not shifted in
+  parallel), which is what makes a held chord sound like a choir holding it.
+  *Glide* is portamento between connected notes. *Humanize* adds per-voice
+  detune, slow drift, late entrances and a different "throat" per voice (the
+  Messina's randomness). *Double* adds a second take of each voice, panned
+  opposite, the main source of width. *Throat* shifts formants. On top of that,
+  voices automatically get brighter as they go up and darker as they go down.
+- **Space** (∞): a long, dark synthetic hall and tape-style warmth on the mix
+  bus. The lead bus is de-harshed and gently compressed, and the voices sit
+  behind it with a softer top. Export renders through the same graph, so
+  what you hear is what you get.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## How it works
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+src/engine/
+  dsp/pitch.ts     YIN candidates on a decimated signal + Viterbi tracking (no octave jumps)
+  dsp/marks.ts     one pitch mark per glottal pulse, chosen jointly by dynamic programming
+  dsp/psola.ts     time-varying TD-PSOLA: exact target pitch, independent formant shift
+  dsp/tune.ts      Auto-Tune-style correction curve with hysteresis
+  dsp/harmony.ts   Messina-style voices: glide, throat, humanize, doubles, panning
+  dsp/bass.ts      the lead an octave down plus a sine sub, with a drive envelope
+  dsp/deess.ts     split-band de-esser for the tuned lead
+  dsp/key.ts       key + tuning offset detection
+  worker/          analysis and rendering run off the main thread
+  fx.ts            Web Audio mix bus (live and offline/export)
+  chords.ts        diatonic chords, voicings around the melody, auto-harmonize
+  AudioEngine.ts   transport, background re-rendering, live chords, undo
+```
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Every edit marks the affected tracks dirty and a debounced background render
+follows (a 51-second take renders in about 0.2 s), so changes are heard almost
+immediately, even mid-playback. Live chords are rendered in 1.6-second windows
+just ahead of the playhead on a second worker, so a chord sounds within about 60 ms of the key going down.
